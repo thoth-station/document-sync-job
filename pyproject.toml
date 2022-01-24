@@ -1,6 +1,6 @@
 [project]
-name = "TODO"
-description = "TODO"
+name = "document-sync-job"
+description = "Sync Thoth documents to an S3 API compatible remote."
 readme = "README.rst"
 requires-python = ">=3.8"
 license = {file = "LICENSE"}

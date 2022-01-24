@@ -1,0 +1,16 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+thoth-common = "*"
+thoth-storages = "*"
+click = "*"
+awscli = "*"
+awscli-plugin-endpoint = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.8"
