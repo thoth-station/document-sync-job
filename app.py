@@ -53,7 +53,7 @@ _METRIC_INFO = Gauge(
 _METRIC_DOCUMENTS_SYNC_NUMBER = Counter(
     "thoth_document_sync_job_success",
     "Thoth Document Sync Job number of synced documents status",
-    ["sync_type", "env", "version"],
+    ["sync_type", "env", "version", "result_type"],
     registry=prometheus_registry,
 )
 
@@ -84,6 +84,7 @@ def sync(dst: str, debug: bool = False, force: bool = False) -> None:
 
     number_synced_documents = 0
     number_unsynced_documents = 0
+    number_skypped_documents = 0
 
     adapters = (AnalysisByDigest, AnalysisResultsStore, SolverResultsStore)
     for adapter_class in adapters:
@@ -96,6 +97,7 @@ def sync(dst: str, debug: bool = False, force: bool = False) -> None:
 
             if proc.returncode == 0 and not force:
                 _LOGGER.info("Document %r is already present", document_id)
+                number_skypped_documents += 1
                 continue
 
             _LOGGER.info("Copying document to %r", destination)
@@ -129,17 +131,26 @@ def sync(dst: str, debug: bool = False, force: bool = False) -> None:
                     number_synced_documents += 1
             break
 
-    _METRIC_DOCUMENTS_SYNC_NUMBER.labels(
-        sync_type="success",
-        env=_THOTH_DEPLOYMENT_NAME,
-        version=__component_version__,
-    ).inc(number_synced_documents)
+        _METRIC_DOCUMENTS_SYNC_NUMBER.labels(
+            sync_type="success",
+            env=_THOTH_DEPLOYMENT_NAME,
+            version=__component_version__,
+            result_type=adapter_class.RESULT_TYPE,
+        ).inc(number_synced_documents)
 
-    _METRIC_DOCUMENTS_SYNC_NUMBER.labels(
-        sync_type="error",
-        env=_THOTH_DEPLOYMENT_NAME,
-        version=__component_version__,
-    ).inc(number_unsynced_documents)
+        _METRIC_DOCUMENTS_SYNC_NUMBER.labels(
+            sync_type="error",
+            env=_THOTH_DEPLOYMENT_NAME,
+            version=__component_version__,
+            result_type=adapter_class.RESULT_TYPE,
+        ).inc(number_unsynced_documents)
+
+        _METRIC_DOCUMENTS_SYNC_NUMBER.labels(
+            sync_type="skipped",
+            env=_THOTH_DEPLOYMENT_NAME,
+            version=__component_version__,
+            result_type=adapter_class.RESULT_TYPE,
+        ).inc(number_skypped_documents)
 
     if _THOTH_METRICS_PUSHGATEWAY_URL:
         try:
