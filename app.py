@@ -29,7 +29,7 @@ from thoth.storages import AnalysisByDigest
 from thoth.storages import AnalysisResultsStore
 from thoth.storages import SolverResultsStore
 
-__version__ = "0.0.0"
+__version__ = "0.1.0"
 __component_version__ = f"{__version__}+storages{__thoth_storages_version__}"
 
 init_logging()
