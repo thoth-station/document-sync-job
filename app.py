@@ -51,7 +51,7 @@ _METRIC_INFO = Gauge(
 )
 
 _METRIC_DOCUMENTS_SYNC_NUMBER = Counter(
-    "thoth_document_sync_job_success",
+    "thoth_document_sync_job",
     "Thoth Document Sync Job number of synced documents status",
     ["sync_type", "env", "version", "result_type"],
     registry=prometheus_registry,
