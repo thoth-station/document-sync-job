@@ -17,6 +17,7 @@
 
 """Sync Thoth documents to an S3 API compatible remote."""
 
+import os
 import json
 import logging
 import subprocess
@@ -29,11 +30,34 @@ from thoth.storages import AnalysisByDigest
 from thoth.storages import AnalysisResultsStore
 from thoth.storages import SolverResultsStore
 
+from prometheus_client import CollectorRegistry, Gauge, Counter, push_to_gateway
+
+prometheus_registry = CollectorRegistry()
+
 __version__ = "0.1.0"
 __component_version__ = f"{__version__}+storages{__thoth_storages_version__}"
 
 init_logging()
 _LOGGER = logging.getLogger("thoth.document_sync")
+_THOTH_DEPLOYMENT_NAME = os.environ["THOTH_DEPLOYMENT_NAME"]
+_THOTH_METRICS_PUSHGATEWAY_URL = os.getenv("PROMETHEUS_PUSHGATEWAY_URL")
+
+# Metrics Document sync
+_METRIC_INFO = Gauge(
+    "thoth_document_sync_job_info",
+    "Thoth Document Sync Job information",
+    ["env", "version"],
+    registry=prometheus_registry,
+)
+
+_METRIC_DOCUMENTS_SYNC_NUMBER = Counter(
+    "thoth_document_sync_job_success",
+    "Thoth Document Sync Job number of synced documents status",
+    ["sync_type", "env", "version", "result_type"],
+    registry=prometheus_registry,
+)
+
+_METRIC_INFO.labels(_THOTH_DEPLOYMENT_NAME, __component_version__).inc()
 
 
 @click.command()
@@ -58,6 +82,10 @@ def sync(dst: str, debug: bool = False, force: bool = False) -> None:
 
     _LOGGER.info("Running document syncing job in version %r", __component_version__)
 
+    number_synced_documents = 0
+    number_unsynced_documents = 0
+    number_skipped_documents = 0
+
     adapters = (AnalysisByDigest, AnalysisResultsStore, SolverResultsStore)
     for adapter_class in adapters:
         adapter = adapter_class()
@@ -69,6 +97,7 @@ def sync(dst: str, debug: bool = False, force: bool = False) -> None:
 
             if proc.returncode == 0 and not force:
                 _LOGGER.info("Document %r is already present", document_id)
+                number_skipped_documents += 1
                 continue
 
             _LOGGER.info("Copying document to %r", destination)
@@ -88,6 +117,7 @@ def sync(dst: str, debug: bool = False, force: bool = False) -> None:
                     ],
                     capture_output=True,
                 )
+
                 if proc.returncode != 0:
                     _LOGGER.error(
                         "Failed to copy %r to %r (exit code %d): %s",
@@ -96,7 +126,42 @@ def sync(dst: str, debug: bool = False, force: bool = False) -> None:
                         proc.returncode,
                         proc.stderr,
                     )
+                    number_unsynced_documents += 1
+                else:
+                    number_synced_documents += 1
             break
+
+        _METRIC_DOCUMENTS_SYNC_NUMBER.labels(
+            sync_type="success",
+            env=_THOTH_DEPLOYMENT_NAME,
+            version=__component_version__,
+            result_type=adapter_class.RESULT_TYPE,
+        ).inc(number_synced_documents)
+
+        _METRIC_DOCUMENTS_SYNC_NUMBER.labels(
+            sync_type="error",
+            env=_THOTH_DEPLOYMENT_NAME,
+            version=__component_version__,
+            result_type=adapter_class.RESULT_TYPE,
+        ).inc(number_unsynced_documents)
+
+        _METRIC_DOCUMENTS_SYNC_NUMBER.labels(
+            sync_type="skipped",
+            env=_THOTH_DEPLOYMENT_NAME,
+            version=__component_version__,
+            result_type=adapter_class.RESULT_TYPE,
+        ).inc(number_skipped_documents)
+
+    if _THOTH_METRICS_PUSHGATEWAY_URL:
+        try:
+            _LOGGER.debug(f"Submitting metrics to Prometheus pushgateway {_THOTH_METRICS_PUSHGATEWAY_URL}")
+            push_to_gateway(
+                _THOTH_METRICS_PUSHGATEWAY_URL,
+                job="document-sync-job",
+                registry=prometheus_registry,
+            )
+        except Exception as e:
+            _LOGGER.exception(f"An error occurred pushing the metrics: {str(e)}")
 
 
 __name__ == "__main__" and sync()
