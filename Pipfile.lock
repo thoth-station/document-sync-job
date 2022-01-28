@@ -149,11 +149,11 @@
         },
         "awscli": {
             "hashes": [
-                "sha256:2c7cf4eef746a382979da7229ab1bf125a99f7f4e8d3ed45552be73b94d3c305",
-                "sha256:30e4b3a2964da74aacd5e2aa3f2da69f713a68912156f4720e384c821f9ed8e7"
+                "sha256:4da9430559db13bdde4d4d9f9b473153cb7ea2bdaf18ac226e1e266ee19f72d2",
+                "sha256:8a2e30068c9aac7525e05e6e05b2c110625c58609ed51d2ff20b21d5e12a6b1b"
             ],
             "index": "pypi",
-            "version": "==1.22.43"
+            "version": "==1.22.45"
         },
         "awscli-plugin-endpoint": {
             "hashes": [
@@ -195,19 +195,19 @@
         },
         "boto3": {
             "hashes": [
-                "sha256:219cba1d078b3c0f3bd1678ee355e07c4a07ea75ee75adee6c306d89d60c555c",
-                "sha256:50611d4707e967f1300e897c196db98cfc1b0ab95eca5d46d3b56a1c8e2a27b5"
+                "sha256:2ea0e0aa1494ef87a342260da8d9381000d774e73d83ee3d7c2906fefcbe2c32",
+                "sha256:3d9cb5edeff09598b7065abe5b42affb0b6e1c0c805ab57c051d0f3592a0f02b"
             ],
             "markers": "python_version >= '3.6'",
-            "version": "==1.20.43"
+            "version": "==1.20.45"
         },
         "botocore": {
             "hashes": [
-                "sha256:22c88a653a026439f2e9b0ade154fafe0eaaaea3fee6e080102d90ec4271284e",
-                "sha256:f8c60dff90a7aea7f84908f0e4e778890d4f08c883d2da111c15c10d7c199102"
+                "sha256:782323846dad22ea814a64bd64b89c7f04550812d3945ce77748b2bac6fe745b",
+                "sha256:793a0a4b572bfb157ba17971e4d783766f59c5a0f117407bbeefeb577efa1ed1"
             ],
             "markers": "python_version >= '3.6'",
-            "version": "==1.23.43"
+            "version": "==1.23.45"
         },
         "cachetools": {
             "hashes": [
@@ -720,11 +720,11 @@
         },
         "prometheus-client": {
             "hashes": [
-                "sha256:1b12ba48cee33b9b0b9de64a1047cbd3c5f2d0ab6ebcead7ddda613a750ec3c5",
-                "sha256:317453ebabff0a1b02df7f708efbab21e3489e7072b61cb6957230dd004a0af0"
+                "sha256:3fdc6fc5b03a9eaee44d015e2913b496864b9ad6557013f23e28f926d7b62913",
+                "sha256:70782d19ea1a3aeb8523aa07780dbee6a595e566198ab4ed7fdc32b53b5fa1d1"
             ],
             "index": "pypi",
-            "version": "==0.12.0"
+            "version": "==0.13.0"
         },
         "psycopg2-binary": {
             "hashes": [
@@ -1110,11 +1110,11 @@
         },
         "thoth-storages": {
             "hashes": [
-                "sha256:65657c59f4d3579062a4646e9d28a78d33754d86c45bb07188607fa462de5112",
-                "sha256:afb3430951b429a1d5b53d811e7227413e136294938bc647ab8229be32ee16e5"
+                "sha256:333488fc26aec44d5baa88b561fe7c9ecaed092603cfbf3e3c01f9da121d3ee5",
+                "sha256:f4463e2e3451060f50ad6014f6517aea55da9a3154275bc786b6e3f7bd104b6c"
             ],
             "index": "pypi",
-            "version": "==0.66.0"
+            "version": "==0.68.1"
         },
         "toml": {
             "hashes": [
