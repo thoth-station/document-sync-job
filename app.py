@@ -30,6 +30,7 @@ from typing import Optional
 
 import click
 from thoth.common import init_logging
+from thoth.common import OpenShift
 from thoth.storages import __version__ as __thoth_storages_version__
 from thoth.storages import AnalysisByDigest
 from thoth.storages import AnalysisResultsStore
@@ -49,6 +50,7 @@ _LOGGER = logging.getLogger("thoth.document_sync")
 _DEFAULT_CONCURRENCY = 16
 _THOTH_DEPLOYMENT_NAME = os.environ["THOTH_DEPLOYMENT_NAME"]
 _THOTH_METRICS_PUSHGATEWAY_URL = os.getenv("PROMETHEUS_PUSHGATEWAY_URL")
+_CONFIGURED_SOLVERS = os.getenv("THOTH_DOCUMENT_SYNC_CONFIGURED_SOLVERS", "")
 
 # Metrics Document sync
 _METRIC_INFO = Gauge(
@@ -176,9 +178,8 @@ def sync(
         start_date = date.today() - timedelta(days=days)
         _LOGGER.info("Listing documents created since %r", start_date.isoformat())
 
-    adapters = (AnalysisByDigest, AnalysisResultsStore, SolverResultsStore)
     try:
-        for adapter_class in adapters:
+        for adapter_class in (AnalysisByDigest, AnalysisResultsStore):
             _LOGGER.info("Listing %r documents", adapter_class.RESULT_TYPE)
             adapter = adapter_class()
             adapter.connect()
@@ -186,6 +187,25 @@ def sync(
             with ThreadPoolExecutor(max_workers=concurrency) as executor:
                 for document_id in adapter.get_document_listing(start_date=start_date):
                     executor.submit(_sync_worker, adapter, document_id, dst, force=force)
+
+        solver_storage = SolverResultsStore()
+        solver_storage.connect()
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            for solver in _CONFIGURED_SOLVERS.split():
+                solver = solver.strip()
+                if not solver:
+                    continue
+
+                solver_spec = OpenShift.parse_python_solver_name(solver)
+                _LOGGER.info("Listing documents for solver %r", solver)
+                for document_id in solver_storage.get_document_listing(
+                    os_name=solver_spec["os_name"],
+                    os_version=solver_spec["os_version"],
+                    python_version=solver_spec["python_version"],
+                    start_date=start_date,
+                ):
+                    executor.submit(_sync_worker, solver_storage, document_id, dst, force=force)
+
     finally:
         if _THOTH_METRICS_PUSHGATEWAY_URL:
             try:
