@@ -1,5 +1,9 @@
 # Changelog for Thoth's Template GitHub Project
 
+## Release 0.3.1 (2022-02-07T21:18:34)
+* :arrow_up: Automatic update of dependencies by Kebechet for the ubi8 environment
+* Respect configured solver types when syncing solver documents
+
 ## Release 0.3.0 (2022-02-07T12:27:51)
 * Perform document sync only for documents that are recent
 

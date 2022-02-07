@@ -41,7 +41,7 @@ from prometheus_client import CollectorRegistry, Gauge, Counter, push_to_gateway
 
 prometheus_registry = CollectorRegistry()
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 __component_version__ = f"{__version__}+storages{__thoth_storages_version__}"
 
 init_logging()
