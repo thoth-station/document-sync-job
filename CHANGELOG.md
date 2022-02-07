@@ -1,5 +1,8 @@
 # Changelog for Thoth's Template GitHub Project
 
+## Release 0.3.0 (2022-02-07T12:27:51)
+* Perform document sync only for documents that are recent
+
 ## Release 0.2.0 (2022-02-03T11:31:27)
 * Use concurrency to optimize copying documents
 * :arrow_up: Automatic update of dependencies by Kebechet for the ubi8 environment
