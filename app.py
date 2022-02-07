@@ -17,13 +17,16 @@
 
 """Sync Thoth documents to an S3 API compatible remote."""
 
-import threading
-import os
 import json
 import logging
+import os
 import subprocess
-from tempfile import NamedTemporaryFile
+import threading
 from concurrent.futures.thread import ThreadPoolExecutor
+from datetime import date
+from datetime import timedelta
+from tempfile import NamedTemporaryFile
+from typing import Optional
 
 import click
 from thoth.common import init_logging
@@ -141,13 +144,26 @@ def _sync_worker(adapter: ResultStorageBase, document_id: str, dst: str, *, forc
     envvar="THOTH_DOCUMENT_SYNC_CONCURRENCY",
     default=_DEFAULT_CONCURRENCY,
 )
+@click.option(
+    "--days",
+    type=int,
+    help="Number of days to the past to sync only more recent documents.",
+    envvar="THOTH_DOCUMENT_SYNC_DAYS",
+    default=None,
+)
 @click.argument(
     "dst",
     envvar="THOTH_DOCUMENT_SYNC_DST",
     type=str,
     metavar="s3://thoth/data/deployment",
 )
-def sync(dst: str, debug: bool = False, force: bool = False, concurrency: int = _DEFAULT_CONCURRENCY) -> None:
+def sync(
+    dst: str,
+    debug: bool = False,
+    force: bool = False,
+    concurrency: int = _DEFAULT_CONCURRENCY,
+    days: Optional[int] = None,
+) -> None:
     """Sync Thoth data to a remote with an S3 compatible interface."""
     if debug:
         _LOGGER.setLevel(logging.DEBUG)
@@ -155,14 +171,20 @@ def sync(dst: str, debug: bool = False, force: bool = False, concurrency: int = 
 
     _LOGGER.info("Running document syncing job in version %r", __component_version__)
 
+    start_date = None
+    if days:
+        start_date = date.today() - timedelta(days=days)
+        _LOGGER.info("Listing documents created since %r", start_date.isoformat())
+
     adapters = (AnalysisByDigest, AnalysisResultsStore, SolverResultsStore)
     try:
         for adapter_class in adapters:
+            _LOGGER.info("Listing %r documents", adapter_class.RESULT_TYPE)
             adapter = adapter_class()
             adapter.connect()
 
             with ThreadPoolExecutor(max_workers=concurrency) as executor:
-                for document_id in adapter.get_document_listing():
+                for document_id in adapter.get_document_listing(start_date=start_date):
                     executor.submit(_sync_worker, adapter, document_id, dst, force=force)
     finally:
         if _THOTH_METRICS_PUSHGATEWAY_URL:
@@ -175,6 +197,8 @@ def sync(dst: str, debug: bool = False, force: bool = False, concurrency: int = 
                 )
             except Exception as e:
                 _LOGGER.exception(f"An error occurred pushing the metrics: {str(e)}")
+
+    _LOGGER.info("Document sync job has finished successfully")
 
 
 __name__ == "__main__" and sync()
