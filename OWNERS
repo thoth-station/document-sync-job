@@ -2,8 +2,15 @@
 
 approvers:
   - goern
-  - fridex
-reviewers:
-  - pacospace
+  - codificat
   - harshad16
   - kpostoffice
+
+reviewers:
+  - codificat
+  - harshad16
+  - kpostoffice
+
+emeritus_approvers:
+  - fridex  # 2022 Jun
+  - pacospace  # 2022 Mar
