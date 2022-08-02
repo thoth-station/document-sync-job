@@ -27,6 +27,7 @@ from datetime import date
 from datetime import timedelta
 from tempfile import NamedTemporaryFile
 from typing import Optional
+from boto3 import client
 
 import click
 from thoth.common import init_logging
@@ -34,6 +35,7 @@ from thoth.common import OpenShift
 from thoth.storages import AnalysisByDigest
 from thoth.storages import AnalysisResultsStore
 from thoth.storages import SolverResultsStore
+from thoth.storages import CephStore
 from thoth.storages.result_base import ResultStorageBase
 
 from prometheus_client import CollectorRegistry, Gauge, Counter, push_to_gateway
@@ -175,6 +177,17 @@ def sync(
     if days:
         start_date = date.today() - timedelta(days=days)
         _LOGGER.info("Listing documents created since %r", start_date.isoformat())
+
+    src_config = CephStore(f"{os.getenv('THOTH_CEPH_BUCKET_PREFIX', '')}/{_THOTH_DEPLOYMENT_NAME}")
+    source = client(
+        "s3",
+        aws_access_key_id=src_config.key_id,
+        aws_secret_access_key=src_config.secret_key,
+        endpoint_url=src_config.host,
+    )
+    dest = client("s3")  # Defaults to using same config discovery than aws-cli.
+    _LOGGER.debug("Source S3 client: %s", vars(source))
+    _LOGGER.debug("Dest S3 client: %s", vars(dest))
 
     try:
         for adapter_class in (AnalysisByDigest, AnalysisResultsStore):
