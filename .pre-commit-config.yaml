@@ -34,7 +34,8 @@ repos:
     hooks:
       - id: mypy
         exclude: '^(docs|tasks|tests)|setup\.py'
-        additionnal_dependencies: types-all
+        additional_dependencies:
+        - types-all
 
   - repo: https://github.com/psf/black
     rev: "22.6.0"
