@@ -21,12 +21,13 @@ import logging
 import os
 import subprocess
 import threading
+import re
 from importlib_metadata import version
 from concurrent.futures.thread import ThreadPoolExecutor
 from datetime import date
 from datetime import timedelta
 from tempfile import NamedTemporaryFile
-from typing import Optional
+from typing import cast, Optional, Tuple
 from boto3 import client
 
 import click
@@ -131,13 +132,18 @@ def _sync_worker(adapter: ResultStorageBase, document_id: str, dst: str, *, forc
                 ).inc()
 
 
+def _parse_s3_uri(ctx, param, value: str) -> Tuple[str, str]:
+    _match = re.match(r"s3://([^/]*)/(.*)", value)
+    if not (_match and len(_match.groups()) == 2):
+        raise click.BadParameter("S3 uri is badly formatted")
+    else:
+        return cast(Tuple[str, str], _match.groups())
+
+
 @click.command()
-@click.option("--debug", is_flag=True, help="Run in a debug mode", envvar="THOTH_SYNC_DEBUG")
+@click.option("--debug", is_flag=True, help="Run in a debug mode", envvar="THOTH_SYNC_DEBUG", default=False)
 @click.option(
-    "--force",
-    is_flag=True,
-    help="Perform force copy of documents.",
-    envvar="THOTH_DOCUMENT_SYNC_FORCE",
+    "--force", is_flag=True, help="Perform force copy of documents.", envvar="THOTH_DOCUMENT_SYNC_FORCE", default=False
 )
 @click.option(
     "--concurrency",
@@ -154,17 +160,14 @@ def _sync_worker(adapter: ResultStorageBase, document_id: str, dst: str, *, forc
     default=None,
 )
 @click.argument(
-    "dst",
-    envvar="THOTH_DOCUMENT_SYNC_DST",
-    type=str,
-    metavar="s3://thoth/data/deployment",
+    "dst", envvar="THOTH_DOCUMENT_SYNC_DST", type=str, metavar="s3://thoth/data/deployment", callback=_parse_s3_uri
 )
 def sync(
-    dst: str,
-    debug: bool = False,
-    force: bool = False,
-    concurrency: int = _DEFAULT_CONCURRENCY,
-    days: Optional[int] = None,
+    dst: Tuple[str, str],
+    debug: bool,
+    force: bool,
+    concurrency: int,
+    days: Optional[int],
 ) -> None:
     """Sync Thoth data to a remote with an S3 compatible interface."""
     if debug:
