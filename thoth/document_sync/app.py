@@ -16,6 +16,8 @@
 
 """Sync Thoth documents to an S3 API compatible remote."""
 
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -28,8 +30,15 @@ from concurrent.futures.thread import ThreadPoolExecutor
 from datetime import date
 from datetime import timedelta
 from tempfile import NamedTemporaryFile
-from typing import cast, Optional, Tuple
 from boto3 import client
+from botocore.exceptions import ClientError
+
+from enum import Enum
+from collections import Counter, defaultdict
+from typing import cast, Optional, Tuple, Type, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from mypy_boto3_s3.client import S3Client
 
 import click
 from thoth.common import init_logging
@@ -39,7 +48,7 @@ from thoth.storages import SolverResultsStore
 from thoth.storages import CephStore
 from thoth.storages.result_base import ResultStorageBase
 
-from prometheus_client import CollectorRegistry, Gauge, Counter, push_to_gateway
+from prometheus_client import CollectorRegistry, Gauge, Counter as PromCounter, push_to_gateway
 
 prometheus_registry = CollectorRegistry()
 
@@ -61,7 +70,7 @@ _METRIC_INFO = Gauge(
     registry=prometheus_registry,
 )
 
-_METRIC_DOCUMENTS_SYNC_NUMBER = Counter(
+_METRIC_DOCUMENTS_SYNC_NUMBER = PromCounter(
     "thoth_document_sync_job",
     "Thoth Document Sync Job number of synced documents status",
     ["sync_type", "env", "version", "result_type"],
@@ -131,6 +140,11 @@ def _sync_worker(adapter: ResultStorageBase, document_id: str, dst: str, *, forc
                     result_type=adapter.RESULT_TYPE,
                 ).inc()
 
+class _SyncResult(Enum):
+    SUCCESS = "success"
+    SKIPPED = "skipped"
+    ERROR = "error"
+
 
 def _parse_s3_uri(ctx, param, value: str) -> Tuple[str, str]:
     _match = re.match(r"s3://([^/]*)/(.*)", value)
@@ -192,6 +206,12 @@ def sync(
     _LOGGER.debug("Source S3 client: %s", vars(source))
     _LOGGER.debug("Dest S3 client: %s", vars(dest))
 
+    total_count: defaultdict[S3Client, Counter[Type[ResultStorageBase]]] = defaultdict(Counter, {source: Counter()})
+
+    metrics: defaultdict[Type[ResultStorageBase], Counter[_SyncResult]] = defaultdict(
+        Counter, {SolverResultsStore: Counter()}
+    )
+
     try:
         adapters = itertools.chain((AnalysisByDigest, AnalysisResultsStore), itertools.repeat(SolverResultsStore))
         prefixs = [f"{AnalysisByDigest.RESULT_TYPE}/", f"{AnalysisResultsStore.RESULT_TYPE}/"] + [
@@ -201,16 +221,37 @@ def sync(
                 for document_id in adapter.get_document_listing(start_date=start_date):
                     executor.submit(_sync_worker, adapter, document_id, dst, force=force)
 
-    finally:
-        if _THOTH_METRICS_PUSHGATEWAY_URL:
-            try:
-                _LOGGER.debug(f"Submitting metrics to Prometheus pushgateway {_THOTH_METRICS_PUSHGATEWAY_URL}")
-                push_to_gateway(
-                    _THOTH_METRICS_PUSHGATEWAY_URL,
-                    job="document-sync-job",
-                    registry=prometheus_registry,
-                )
-            except Exception as e:
-                _LOGGER.exception(f"An error occurred pushing the metrics: {str(e)}")
+        _LOGGER.info("Document sync job has finished successfully")
 
-    _LOGGER.info("Document sync job has finished successfully")
+    except ClientError as e:
+        _LOGGER.exception("An error occured during the sync process: ", exc_info=True)
+        _LOGGER.error("API response: %s", e.response)
+
+    _LOGGER.info("Total count: %s", total_count)
+    for _adapter in total_count[source].keys():
+        metrics[_adapter][_SyncResult.SKIPPED] = total_count[source][_adapter] - (
+            metrics[_adapter][_SyncResult.SUCCESS] + metrics[_adapter][_SyncResult.ERROR]
+        )
+    _LOGGER.info("metrics: %s", metrics)
+    _LOGGER.info("Summary of the sync operation:",)
+    for adapter in total_count[source].keys():
+        _LOGGER.info("%s: " + ", ".join(itertools.repeat("%i %s", len(_SyncResult))), adapter.RESULT_TYPE,
+                     *itertools.chain.from_iterable((metrics[adapter][r], r.value) for r in _SyncResult))
+
+    if _THOTH_METRICS_PUSHGATEWAY_URL:
+
+        for _adapter, by_result in metrics.items():
+            for result, amount in by_result.items():
+                _METRIC_DOCUMENTS_SYNC_NUMBER.labels(
+                    sync_type=result.name,
+                    env=_THOTH_DEPLOYMENT_NAME,
+                    version=__component_version__,
+                    result_type=_adapter,
+                ).inc(amount)
+
+        _LOGGER.info(f"Submitting metrics to Prometheus pushgateway {_THOTH_METRICS_PUSHGATEWAY_URL}")
+        push_to_gateway(
+            _THOTH_METRICS_PUSHGATEWAY_URL,
+            job="document-sync-job",
+            registry=prometheus_registry,
+        )
