@@ -4,6 +4,7 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+boto3 = "*"
 thoth-common = "*"
 thoth-storages = "*"
 click = "*"
@@ -12,6 +13,8 @@ awscli-plugin-endpoint = "*"
 prometheus-client = "*"
 
 [dev-packages]
+"boto3-stubs[s3]" = "*"
+mypy = "*"
 
 [requires]
 python_version = "3.8"
