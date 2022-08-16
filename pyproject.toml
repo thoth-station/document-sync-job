@@ -5,6 +5,9 @@ readme = "README.rst"
 requires-python = ">=3.8"
 license = {file = "LICENSE"}
 
+[project.scripts]
+document-sync-job = "app:sync"
+
 [build-system]
 requires = ["setuptools", "wheel"]
 
