@@ -8,8 +8,6 @@ boto3 = "*"
 thoth-common = "*"
 thoth-storages = "*"
 click = "*"
-awscli = "*"
-awscli-plugin-endpoint = "*"
 prometheus-client = "*"
 
 [dev-packages]

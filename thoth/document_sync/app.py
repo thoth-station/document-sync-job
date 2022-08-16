@@ -18,18 +18,15 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import subprocess
-import threading
 import re
 import itertools
 from importlib_metadata import version
 from concurrent.futures.thread import ThreadPoolExecutor
+from concurrent.futures import as_completed
 from datetime import date
 from datetime import timedelta
-from tempfile import NamedTemporaryFile
 from boto3 import client
 from botocore.exceptions import ClientError
 
@@ -49,7 +46,6 @@ from thoth.storages import CephStore
 from thoth.storages.result_base import ResultStorageBase
 
 from prometheus_client import CollectorRegistry, Gauge, Counter as PromCounter, push_to_gateway
-
 from .lazy_set_ops import sorted_iter_set_difference
 
 prometheus_registry = CollectorRegistry()
@@ -79,68 +75,8 @@ _METRIC_DOCUMENTS_SYNC_NUMBER = PromCounter(
     registry=prometheus_registry,
 )
 
-_METRIC_DOCUMENTS_SYNC_NUMBER_THREAD_LOCK = threading.Lock()
-
 _METRIC_INFO.labels(_THOTH_DEPLOYMENT_NAME, __component_version__).inc()
 
-
-def _sync_worker(adapter: ResultStorageBase, document_id: str, dst: str, *, force: bool = False) -> None:
-    """Sync document logic."""
-    destination = f"{dst}/{adapter.RESULT_TYPE}/{document_id}"
-    proc = subprocess.run(["aws", "s3", "ls", destination], capture_output=True)
-
-    if proc.returncode == 0 and not force:
-        _LOGGER.info("Document %r is already present", document_id)
-        with _METRIC_DOCUMENTS_SYNC_NUMBER_THREAD_LOCK:
-            _METRIC_DOCUMENTS_SYNC_NUMBER.labels(
-                sync_type="skipped",
-                env=_THOTH_DEPLOYMENT_NAME,
-                version=__component_version__,
-                result_type=adapter.RESULT_TYPE,
-            ).inc()
-        return
-
-    _LOGGER.info("Copying document to %r", destination)
-
-    document = adapter.retrieve_document(document_id)
-    with NamedTemporaryFile(mode="w") as temp:
-        temp.write(json.dumps(document, sort_keys=True, indent=2))
-        temp.flush()
-
-        proc = subprocess.run(
-            [
-                "aws",
-                "s3",
-                "cp",
-                temp.name,
-                destination,
-            ],
-            capture_output=True,
-        )
-        if proc.returncode != 0:
-            _LOGGER.error(
-                "Failed to copy %r to %r (exit code %d): %s",
-                document_id,
-                destination,
-                proc.returncode,
-                proc.stderr,
-            )
-            with _METRIC_DOCUMENTS_SYNC_NUMBER_THREAD_LOCK:
-                _METRIC_DOCUMENTS_SYNC_NUMBER.labels(
-                    sync_type="error",
-                    env=_THOTH_DEPLOYMENT_NAME,
-                    version=__component_version__,
-                    result_type=adapter.RESULT_TYPE,
-                ).inc()
-        else:
-            _LOGGER.info("Document %r successfully copied to %r", document_id, destination)
-            with _METRIC_DOCUMENTS_SYNC_NUMBER_THREAD_LOCK:
-                _METRIC_DOCUMENTS_SYNC_NUMBER.labels(
-                    sync_type="success",
-                    env=_THOTH_DEPLOYMENT_NAME,
-                    version=__component_version__,
-                    result_type=adapter.RESULT_TYPE,
-                ).inc()
 
 class _SyncResult(Enum):
     SUCCESS = "success"
@@ -208,6 +144,19 @@ def sync(
     _LOGGER.debug("Source S3 client: %s", vars(source))
     _LOGGER.debug("Dest S3 client: %s", vars(dest))
 
+    def _sync_one_key(key: str) -> None:
+        # NOTE: boto3 sessions and resources are not thread-safe, clients are
+        _LOGGER.debug(
+            "Syncing source key (bucket='%s') '%s' to dest (bucket=%s) key '%s'",
+            src_config.bucket,
+            src_config.prefix + key,
+            dst[0],
+            dst[1] + key,
+        )
+        dest.upload_fileobj(
+            source.get_object(Bucket=src_config.bucket, Key=src_config.prefix + key)["Body"], dst[0], dst[1] + key
+        )
+
     total_count: defaultdict[S3Client, Counter[Type[ResultStorageBase]]] = defaultdict(Counter, {source: Counter()})
 
     def _s3_all_dates(
@@ -256,9 +205,17 @@ def sync(
             documents_to_sync = itertools.chain.from_iterable(
                 (sorted_iter_set_difference(*gens) for gens in zip(src_documents, dest_documents))  # aka zipWith
             )
+
             with ThreadPoolExecutor(max_workers=concurrency) as executor:
-                for document_id in adapter.get_document_listing(start_date=start_date):
-                    executor.submit(_sync_worker, adapter, document_id, dst, force=force)
+                for future in as_completed(
+                    executor.submit(_sync_one_key, doc) for doc in documents_to_sync
+                ):  # as_completed breaks lazyness. Will do for now
+                    if future.exception():
+                        _LOGGER.exception("An error occured while syncing a document: ", exc_info=future.exception())
+                        result = _SyncResult.ERROR
+                    else:
+                        result = _SyncResult.SUCCESS
+                    metrics[adapter][result] += 1
 
         _LOGGER.info("Document sync job has finished successfully")
 
