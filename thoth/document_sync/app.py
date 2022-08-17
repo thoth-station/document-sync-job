@@ -35,7 +35,7 @@ from botocore.exceptions import ClientError
 
 from enum import Enum
 from collections import Counter, defaultdict
-from typing import cast, Optional, Tuple, Type, TYPE_CHECKING
+from typing import cast, Optional, Iterable, Tuple, Type, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from mypy_boto3_s3.client import S3Client
@@ -49,6 +49,8 @@ from thoth.storages import CephStore
 from thoth.storages.result_base import ResultStorageBase
 
 from prometheus_client import CollectorRegistry, Gauge, Counter as PromCounter, push_to_gateway
+
+from .lazy_set_ops import sorted_iter_set_difference
 
 prometheus_registry = CollectorRegistry()
 
@@ -208,6 +210,35 @@ def sync(
 
     total_count: defaultdict[S3Client, Counter[Type[ResultStorageBase]]] = defaultdict(Counter, {source: Counter()})
 
+    def _s3_all_dates(
+        client: S3Client,
+        bucket: str,
+        root_prefix: str,
+        doc_prefix: str,
+        adapter: Type[ResultStorageBase],
+        start_date: Optional[date],
+    ) -> Iterable[Iterable[str]]:
+
+        paginator = client.get_paginator("list_objects_v2")
+
+        def _s3_keys(date_prefix: str) -> Iterable[str]:
+            nonlocal total_count
+            prefix = f"{root_prefix}{doc_prefix}{date_prefix}"
+            location = f"{client._endpoint}, bucket: '{bucket}', prefix: '{prefix}'"
+            _LOGGER.debug("Listing objects at %s", location)
+            for page_no, page in enumerate(paginator.paginate(Bucket=bucket, Prefix=prefix)):
+                contents = page.get("Contents")
+                if contents is not None:
+                    total_count[client][adapter] += page["KeyCount"]
+                    yield from (x["Key"][len(root_prefix) :] for x in contents if not x["Key"].endswith(".request"))
+                elif page_no == 0:
+                    _LOGGER.info("No objects at %s", location)
+
+        if start_date is not None:
+            yield from (_s3_keys(date_prefix) for date_prefix in adapter._iter_dates_prefix_addition(start_date))
+        else:
+            yield from ([_s3_keys("")])
+
     metrics: defaultdict[Type[ResultStorageBase], Counter[_SyncResult]] = defaultdict(
         Counter, {SolverResultsStore: Counter()}
     )
@@ -217,6 +248,14 @@ def sync(
         prefixs = [f"{AnalysisByDigest.RESULT_TYPE}/", f"{AnalysisResultsStore.RESULT_TYPE}/"] + [
             solver.strip() for solver in _CONFIGURED_SOLVERS.split() if solver.strip()
         ]
+        for adapter, prefix in zip(adapters, prefixs):
+            _LOGGER.info(f"Listing {adapter.RESULT_TYPE} documents with prefix {prefix}")
+
+            src_documents = _s3_all_dates(source, src_config.bucket, src_config.prefix, prefix, adapter, start_date)
+            dest_documents = _s3_all_dates(dest, *dst, prefix, adapter, start_date)
+            documents_to_sync = itertools.chain.from_iterable(
+                (sorted_iter_set_difference(*gens) for gens in zip(src_documents, dest_documents))  # aka zipWith
+            )
             with ThreadPoolExecutor(max_workers=concurrency) as executor:
                 for document_id in adapter.get_document_listing(start_date=start_date):
                     executor.submit(_sync_worker, adapter, document_id, dst, force=force)
