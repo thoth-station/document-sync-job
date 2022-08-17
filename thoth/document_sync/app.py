@@ -22,6 +22,7 @@ import os
 import subprocess
 import threading
 import re
+import itertools
 from importlib_metadata import version
 from concurrent.futures.thread import ThreadPoolExecutor
 from datetime import date
@@ -32,7 +33,6 @@ from boto3 import client
 
 import click
 from thoth.common import init_logging
-from thoth.common import OpenShift
 from thoth.storages import AnalysisByDigest
 from thoth.storages import AnalysisResultsStore
 from thoth.storages import SolverResultsStore
@@ -193,32 +193,13 @@ def sync(
     _LOGGER.debug("Dest S3 client: %s", vars(dest))
 
     try:
-        for adapter_class in (AnalysisByDigest, AnalysisResultsStore):
-            _LOGGER.info("Listing %r documents", adapter_class.RESULT_TYPE)
-            adapter = adapter_class()
-            adapter.connect()
-
+        adapters = itertools.chain((AnalysisByDigest, AnalysisResultsStore), itertools.repeat(SolverResultsStore))
+        prefixs = [f"{AnalysisByDigest.RESULT_TYPE}/", f"{AnalysisResultsStore.RESULT_TYPE}/"] + [
+            solver.strip() for solver in _CONFIGURED_SOLVERS.split() if solver.strip()
+        ]
             with ThreadPoolExecutor(max_workers=concurrency) as executor:
                 for document_id in adapter.get_document_listing(start_date=start_date):
                     executor.submit(_sync_worker, adapter, document_id, dst, force=force)
-
-        solver_storage = SolverResultsStore()
-        solver_storage.connect()
-        with ThreadPoolExecutor(max_workers=concurrency) as executor:
-            for solver in _CONFIGURED_SOLVERS.split():
-                solver = solver.strip()
-                if not solver:
-                    continue
-
-                solver_spec = OpenShift.parse_python_solver_name(solver)
-                _LOGGER.info("Listing documents for solver %r", solver)
-                for document_id in solver_storage.get_document_listing(
-                    os_name=solver_spec["os_name"],
-                    os_version=solver_spec["os_version"],
-                    python_version=solver_spec["python_version"],
-                    start_date=start_date,
-                ):
-                    executor.submit(_sync_worker, solver_storage, document_id, dst, force=force)
 
     finally:
         if _THOTH_METRICS_PUSHGATEWAY_URL:
