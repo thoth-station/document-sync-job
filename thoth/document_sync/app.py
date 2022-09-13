@@ -111,15 +111,18 @@ def _parse_s3_uri(ctx, param, value: str) -> Tuple[str, str]:
     envvar="THOTH_DOCUMENT_SYNC_DAYS",
     default=None,
 )
+@click.option(
+    "--s3-url",
+    type=str,
+    help="S3 service url for sync destination",
+    envvar="AWS_S3_ENDPOINT_URL",
+    default=None,
+)
 @click.argument(
     "dst", envvar="THOTH_DOCUMENT_SYNC_DST", type=str, metavar="s3://thoth/data/deployment", callback=_parse_s3_uri
 )
 def sync(
-    dst: Tuple[str, str],
-    debug: bool,
-    force: bool,
-    concurrency: int,
-    days: Optional[int],
+    dst: Tuple[str, str], debug: bool, force: bool, concurrency: int, days: Optional[int], s3_url: Optional[str]
 ) -> None:
     """Sync Thoth data to a remote with an S3 compatible interface."""
     if debug:
@@ -140,7 +143,7 @@ def sync(
         aws_secret_access_key=src_config.secret_key,
         endpoint_url=src_config.host,
     )
-    dest = client("s3")  # Defaults to using same config discovery than aws-cli.
+    dest = client("s3", endpoint_url=s3_url)  # Defaults to using same config discovery than aws-cli.
     _LOGGER.debug("Source S3 client: %s", vars(source))
     _LOGGER.debug("Dest S3 client: %s", vars(dest))
 
