@@ -118,17 +118,26 @@ def _parse_s3_uri(ctx, param, value: str) -> Tuple[str, str]:
     envvar="AWS_S3_ENDPOINT_URL",
     default=None,
 )
+@click.option("--dry-run", is_flag=True, help="Only log what would happen, do not actually sync", default=False)
 @click.argument(
     "dst", envvar="THOTH_DOCUMENT_SYNC_DST", type=str, metavar="s3://thoth/data/deployment", callback=_parse_s3_uri
 )
 def sync(
-    dst: Tuple[str, str], debug: bool, force: bool, concurrency: int, days: Optional[int], s3_url: Optional[str]
+    dst: Tuple[str, str],
+    debug: bool,
+    force: bool,
+    concurrency: int,
+    days: Optional[int],
+    s3_url: Optional[str],
+    dry_run: bool,
 ) -> None:
     """Sync Thoth data to a remote with an S3 compatible interface."""
     if debug:
         _LOGGER.setLevel(logging.DEBUG)
         _LOGGER.debug("Debug mode is on.")
 
+    if dry_run:
+        _LOGGER.info("Running in dry-run mode")
     _LOGGER.info("Running document syncing job in version %r", __component_version__)
 
     start_date = None
@@ -156,9 +165,10 @@ def sync(
             dst[0],
             dst[1] + key,
         )
-        dest.upload_fileobj(
-            source.get_object(Bucket=src_config.bucket, Key=src_config.prefix + key)["Body"], dst[0], dst[1] + key
-        )
+        if not dry_run:
+            dest.upload_fileobj(
+                source.get_object(Bucket=src_config.bucket, Key=src_config.prefix + key)["Body"], dst[0], dst[1] + key
+            )
 
     total_count: defaultdict[S3Client, Counter[Type[ResultStorageBase]]] = defaultdict(Counter, {source: Counter()})
 
