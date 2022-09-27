@@ -206,11 +206,14 @@ def sync(
     )
 
     try:
-        adapters = itertools.chain((AnalysisByDigest, AnalysisResultsStore), itertools.repeat(SolverResultsStore))
-        prefixs = [f"{AnalysisByDigest.RESULT_TYPE}/", f"{AnalysisResultsStore.RESULT_TYPE}/"] + [
-            solver.strip() for solver in _CONFIGURED_SOLVERS.split() if solver.strip()
-        ]
-        for adapter, prefix in zip(adapters, prefixs):
+        adapters_and_prefixes = list(
+            zip(
+                itertools.chain((AnalysisByDigest, AnalysisResultsStore), itertools.repeat(SolverResultsStore)),
+                [f"{AnalysisByDigest.RESULT_TYPE}/", f"{AnalysisResultsStore.RESULT_TYPE}/"]
+                + [f"solver/{solver.strip()}" for solver in _CONFIGURED_SOLVERS.split() if solver.strip()],
+            )
+        )
+        for adapter, prefix in adapters_and_prefixes:
             _LOGGER.info(f"Listing {adapter.RESULT_TYPE} documents with prefix {prefix}")
 
             src_documents = _s3_all_dates(source, src_config.bucket, src_config.prefix, prefix, adapter, start_date)
@@ -242,10 +245,15 @@ def sync(
             metrics[_adapter][_SyncResult.SUCCESS] + metrics[_adapter][_SyncResult.ERROR]
         )
     _LOGGER.info("metrics: %s", metrics)
-    _LOGGER.info("Summary of the sync operation:",)
-    for adapter in total_count[source].keys():
-        _LOGGER.info("%s: " + ", ".join(itertools.repeat("%i %s", len(_SyncResult))), adapter.RESULT_TYPE,
-                     *itertools.chain.from_iterable((metrics[adapter][r], r.value) for r in _SyncResult))
+    _LOGGER.info(
+        "Summary of the sync operation:",
+    )
+    for adapter, _ in itertools.groupby(adapters_and_prefixes, key=lambda x: x[0]):
+        _LOGGER.info(
+            "%s: " + ", ".join(itertools.repeat("%i %s", len(_SyncResult))),
+            adapter.RESULT_TYPE,
+            *itertools.chain.from_iterable((metrics[adapter][r], r.value) for r in _SyncResult),
+        )
 
     if _THOTH_METRICS_PUSHGATEWAY_URL:
 
