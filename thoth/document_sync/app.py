@@ -25,8 +25,6 @@ import itertools
 from importlib_metadata import version
 from concurrent.futures.thread import ThreadPoolExecutor
 from concurrent.futures import as_completed
-from datetime import date
-from datetime import timedelta
 from boto3 import client
 from botocore.exceptions import ClientError
 
@@ -105,13 +103,6 @@ def _parse_s3_uri(ctx, param, value: str) -> Tuple[str, str]:
     default=_DEFAULT_CONCURRENCY,
 )
 @click.option(
-    "--days",
-    type=int,
-    help="Number of days to the past to sync only more recent documents.",
-    envvar="THOTH_DOCUMENT_SYNC_DAYS",
-    default=None,
-)
-@click.option(
     "--s3-url",
     type=str,
     help="S3 service url for sync destination",
@@ -127,7 +118,6 @@ def sync(
     debug: bool,
     force: bool,
     concurrency: int,
-    days: Optional[int],
     s3_url: Optional[str],
     dry_run: bool,
 ) -> None:
@@ -139,11 +129,6 @@ def sync(
     if dry_run:
         _LOGGER.info("Running in dry-run mode")
     _LOGGER.info("Running document syncing job in version %r", __component_version__)
-
-    start_date = None
-    if days:
-        start_date = date.today() - timedelta(days=days)
-        _LOGGER.info("Listing documents created since %r", start_date.isoformat())
 
     src_config = CephStore(f"{os.getenv('THOTH_CEPH_BUCKET_PREFIX', '')}/{_THOTH_DEPLOYMENT_NAME}")
     source = client(
@@ -172,34 +157,27 @@ def sync(
 
     total_count: defaultdict[S3Client, Counter[Type[ResultStorageBase]]] = defaultdict(Counter, {source: Counter()})
 
-    def _s3_all_dates(
+    def _s3_keys(
         client: S3Client,
         bucket: str,
         root_prefix: str,
         doc_prefix: str,
         adapter: Type[ResultStorageBase],
-        start_date: Optional[date],
-    ) -> Iterable[Iterable[str]]:
+    ) -> Iterable[str]:
 
         paginator = client.get_paginator("list_objects_v2")
 
-        def _s3_keys(date_prefix: str) -> Iterable[str]:
-            nonlocal total_count
-            prefix = f"{root_prefix}{doc_prefix}{date_prefix}"
-            location = f"{client._endpoint}, bucket: '{bucket}', prefix: '{prefix}'"
-            _LOGGER.debug("Listing objects at %s", location)
-            for page_no, page in enumerate(paginator.paginate(Bucket=bucket, Prefix=prefix)):
-                contents = page.get("Contents")
-                if contents is not None:
-                    total_count[client][adapter] += page["KeyCount"]
-                    yield from (x["Key"][len(root_prefix) :] for x in contents if not x["Key"].endswith(".request"))
-                elif page_no == 0:
-                    _LOGGER.info("No objects at %s", location)
-
-        if start_date is not None:
-            yield from (_s3_keys(date_prefix) for date_prefix in adapter._iter_dates_prefix_addition(start_date))
-        else:
-            yield from ([_s3_keys("")])
+        nonlocal total_count
+        prefix = f"{root_prefix}{doc_prefix}"
+        location = f"{client._endpoint}, bucket: '{bucket}', prefix: '{prefix}'"
+        _LOGGER.debug("Listing objects at %s", location)
+        for page_no, page in enumerate(paginator.paginate(Bucket=bucket, Prefix=prefix)):
+            contents = page.get("Contents")
+            if contents is not None:
+                total_count[client][adapter] += page["KeyCount"]
+                yield from (x["Key"][len(root_prefix) :] for x in contents if not x["Key"].endswith(".request"))
+            elif page_no == 0:
+                _LOGGER.info("No objects at %s", location)
 
     metrics: defaultdict[Type[ResultStorageBase], Counter[_SyncResult]] = defaultdict(
         Counter, {SolverResultsStore: Counter()}
@@ -216,11 +194,9 @@ def sync(
         for adapter, prefix in adapters_and_prefixes:
             _LOGGER.info(f"Listing {adapter.RESULT_TYPE} documents with prefix {prefix}")
 
-            src_documents = _s3_all_dates(source, src_config.bucket, src_config.prefix, prefix, adapter, start_date)
-            dest_documents = _s3_all_dates(dest, *dst, prefix, adapter, start_date)
-            documents_to_sync = itertools.chain.from_iterable(
-                (sorted_iter_set_difference(*gens) for gens in zip(src_documents, dest_documents))  # aka zipWith
-            )
+            src_documents = _s3_keys(source, src_config.bucket, src_config.prefix, prefix, adapter)
+            dest_documents = _s3_keys(dest, *dst, prefix, adapter)
+            documents_to_sync = sorted_iter_set_difference(src_documents, dest_documents)
 
             with ThreadPoolExecutor(max_workers=concurrency) as executor:
                 for future in as_completed(
