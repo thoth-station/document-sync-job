@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # thoth-document-sync
 # Copyright(C) 2022 Red Hat, Inc.
 #
@@ -22,6 +21,7 @@ import logging
 import os
 import subprocess
 import threading
+from importlib_metadata import version
 from concurrent.futures.thread import ThreadPoolExecutor
 from datetime import date
 from datetime import timedelta
@@ -31,7 +31,6 @@ from typing import Optional
 import click
 from thoth.common import init_logging
 from thoth.common import OpenShift
-from thoth.storages import __version__ as __thoth_storages_version__
 from thoth.storages import AnalysisByDigest
 from thoth.storages import AnalysisResultsStore
 from thoth.storages import SolverResultsStore
@@ -41,8 +40,7 @@ from prometheus_client import CollectorRegistry, Gauge, Counter, push_to_gateway
 
 prometheus_registry = CollectorRegistry()
 
-__version__ = "0.3.1"
-__component_version__ = f"{__version__}+storages{__thoth_storages_version__}"
+__component_version__ = f"{version('document-sync-job')}+storages{version('thoth-storages')}"
 
 init_logging()
 _LOGGER = logging.getLogger("thoth.document_sync")
@@ -219,6 +217,3 @@ def sync(
                 _LOGGER.exception(f"An error occurred pushing the metrics: {str(e)}")
 
     _LOGGER.info("Document sync job has finished successfully")
-
-
-__name__ == "__main__" and sync()

@@ -4,9 +4,19 @@ description = "Sync Thoth documents to an S3 API compatible remote."
 readme = "README.rst"
 requires-python = ">=3.8"
 license = {file = "LICENSE"}
+dynamic = ["version"]
+
+[project.scripts]
+document-sync-job = "thoth.document_sync.app:sync"
 
 [build-system]
 requires = ["setuptools", "wheel"]
+
+[tool.setuptools.dynamic]
+version = {attr = "thoth.document_sync.__version__"}
+
+[tool.pydocstyle]
+ignore = ["D104"]
 
 [tool.black]
 line-length = 120
